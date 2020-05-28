@@ -1,21 +1,5 @@
-# based on original work by Mike Peachey @ BJSS
-# modified into ZSH plugin and a few tweeks made by Ian P. Christian @ BJSS
-# please feedback modifications to this ZSH plugin to <ian.christian@bjss.com>
-
-
-# prompt requires p9k or p10k
-# in ~/.zshrc
-#
-#   plugins=(zsh-aws)
-#
-# in ~/.p10k.zsh
-#
-# typeset -ga POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(
-# ....
-# aws_prompt_info
-# ....
-# )
-#
+# Based on original work by Mike Peachey and and the ZSH port by Ian Christian @ BJSS
+# modified (again) to work with MacOS and oh-my-zsh, specifically
 
 function aws_unset_creds() {
   echo "Unsetting all existing AWS_* credential-related environment variables...";
@@ -85,7 +69,17 @@ function aws_auth_mfa() {
   declare -a session_tokens;
 
   # Check for valid AWS credentials
-  # TODO: does not currently check whether current state is an expired STS token
+  # Check whether current state is an expired STS token
+  if [[ -n "$AWS_MFA_EXPIRY" ]]; then  
+    local expiry_ts=`gdate --date $AWS_MFA_EXPIRY +%s`
+    local now_ts=`date -j +"%s"`
+    
+    if [[ now_ts -ge expiry_ts ]]; then
+      echo "Error: current AWS token has expired." >&2;
+      return 1;
+    fi;
+  fi;
+  
   local caller_identity=($(aws sts get-caller-identity --output text));
   if ! [ "${?}" -eq 0 ]; then
     echo "Error: current AWS credential configuration invalid - did you forget to run aws_set_creds?" >&2;
@@ -94,7 +88,7 @@ function aws_auth_mfa() {
 
   # Check if currently using an STS token (i.e. MFA, role assumed, or some other funkiness)
   if [[ -n "${AWS_SESSION_TOKEN+x}" ]]; then
-    echo "Error: already using an STS token, you probably don't want to do MFA authentication at this point - perhaps run aws_reset_creds to reset" >&2;
+    echo "Error: already using an STS token, you probably don't want to do MFA authentication at this point - perhaps run aws_set_creds again to reset" >&2;
     return 1;
   fi;
 
@@ -162,7 +156,17 @@ function aws_assume_role(){
   fi;
 
   # Check for valid AWS credentials
-  # TODO: does not currently check whether current state is an expired STS token
+  # Check whether current state is an expired STS token
+  if [[ -n "$AWS_MFA_EXPIRY" ]]; then  
+    local expiry_ts=`gdate --date $AWS_MFA_EXPIRY +%s`
+    local now_ts=`date -j +"%s"`
+    
+    if [[ now_ts -ge expiry_ts ]]; then
+      echo "Error: current AWS token has expired." >&2;
+      return 1;
+    fi;
+  fi;
+
   declare caller_identity;
   caller_identity=($(aws sts get-caller-identity --output text));
   if ! [ "${?}" -eq 0 ]; then
@@ -241,18 +245,70 @@ function aws_assume_role(){
   fi;
 }
 
+# Persist the AWS session by writing the temporary token and keys to the AWS Credentials file
+function aws_persist_mfa() {
+
+  # Check for valid AWS credentials
+  # Check the current expiry of the token has not elapsed
+   if [[ -n "$AWS_MFA_EXPIRY" ]]; then  
+      local expiry_ts=`gdate --date $AWS_MFA_EXPIRY +%s`
+      local now_ts=`date -j +"%s"`
+      
+      if [[ now_ts -ge expiry_ts ]]; then
+        echo "Error: current AWS token has expired." >&2;
+        return 1;
+      fi;
+    fi;
+
+  # Check to see if the credentials currently being used are valid
+  local caller_identity=($(aws sts get-caller-identity --output text));
+  if ! [ "${?}" -eq 0 ]; then
+    echo "Error: current AWS credential configuration invalid - did you forget to run aws_set_creds?" >&2;
+    return 1;
+  fi;
+
+  # Is there a credentials block listed with the AWS_PROFILE with '-mfa' at the end listed, eg [myprofile-mfa]
+  CREDENTIALS_BLOCK=$( gsed -nr "/^\[${AWS_PROFILE}-mfa\]/ { :l /^\s*[^#].*/ p; n; /^\[/ q; b l; }" ~/.aws/credentials )
+
+  NEW_CREDENTIALS_BLOCK=$( printf '%s\n%s\n%s\n%s\n%s\n' \
+    "[${AWS_PROFILE}-mfa]" \
+    "aws_session_expiry=${AWS_MFA_EXPIRY}" \
+    "aws_access_key_id=${AWS_ACCESS_KEY_ID}" \
+    "aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}" \
+    "aws_session_token=${AWS_SESSION_TOKEN}" )
+
+  # If there is not matching credentials block just dump the newly required block at the end.
+  if ! [[ -n "$CREDENTIALS_BLOCK" ]]; then
+    echo "\n${NEW_CREDENTIALS_BLOCK}" >> ~/.aws/credentials
+    echo "Temporary session details stored in the credentials file" >&2;
+  else
+    # Create a backup first
+    cp ~/.aws/credentials ~/.aws/credentials.backup
+
+    # Overwrite the credentials block with the new block as it already exists
+    gawk -v ncb="$NEW_CREDENTIALS_BLOCK" -v ap="$AWS_PROFILE-mfa" -v RS= '{ORS = RT} $1 == "["ap"]" {$0 = ncb} 1' ~/.aws/credentials > ~/.aws/credentials.tmp
+    
+    # AWK wont write a file that is also the input without it breaking so a tmp file is created.
+    # move the tmp file to the inplace file
+    mv ~/.aws/credentials.tmp ~/.aws/credentials
+
+    echo -n "Looks like MFA details for this profile exist and have been updated" >&2;
+  fi
+}
+
 # AWS prompt
 function prompt_aws_prompt_info() {
   local aws_profile="${AWS_PROFILE:-$AWS_DEFAULT_PROFILE}"
 
   if [[ -n "$aws_profile" ]]; then
     if [[ -n "$AWS_MFA_EXPIRY" ]]; then  
-      local expiry_ts=`date -j -f "%Y-%m-%dT%H:%M:%SZ" $AWS_MFA_EXPIRY +"%s"`
+      local expiry_ts=`gdate --date $AWS_MFA_EXPIRY +%s`
       local now_ts=`date -j +"%s"`
+
       if [[ now_ts -ge expiry_ts ]]; then
         p10k segment -f 204 -t "${aws_profile} (expired MFA)" -i AWS_ICON -r 
       else
-	      p10k segment -f 3 -t "${aws_profile} (active MFA)" -i AWS_ICON -r 
+	      p10k segment -f 3 -t "${aws_profile} (MFA)" -i AWS_ICON -r 
       fi;
     else
       p10k segment -f 3 -t ${aws_profile} -i AWS_ICON -r 
