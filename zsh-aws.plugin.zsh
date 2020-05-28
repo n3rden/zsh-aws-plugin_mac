@@ -267,6 +267,11 @@ function aws_persist_mfa() {
     return 1;
   fi;
 
+  # Might be using 'default' profile so check for a missing AWS_PROFILE variable and set accordingly  
+  if ! [[ -n "$AWS_PROFILE" ]]; then
+    AWS_PROFILE=default
+  fi;
+
   # Is there a credentials block listed with the AWS_PROFILE with '-mfa' at the end listed, eg [myprofile-mfa]
   CREDENTIALS_BLOCK=$( gsed -nr "/^\[${AWS_PROFILE}-mfa\]/ { :l /^\s*[^#].*/ p; n; /^\[/ q; b l; }" ~/.aws/credentials )
 
