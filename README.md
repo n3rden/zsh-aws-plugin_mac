@@ -8,14 +8,17 @@
 
 ## Setup
 1) Clone this repository somewhere
-2) Symlink the zsh-aws-plugin.zsh (you will need to update the path in the snippit below)
+2) clone the zsh-aws-plugin.zsh (you will need to update the path in the snippit below)
 
-        cd <path-to-repo>/
-        mkdir ~/.oh-my-zsh/plugins/zsh-aws
-        ln -s <path-to-repo>/zsh-aws.plugin.zsh ~/.oh-my-zsh/plugins/zsh-aws/zsh-aws.plugin.zsh
+        git clone git@github.com:n3rden/zsh-aws-plugin_mac.git ~/.oh-my-zsh/plugins/zsh-aws
 
+3) Enable the plugin
+        vi ~/.zshrc
+        # find the line that looks like 'plugins=(git) and change it to 
+        plugins=(git zsh-aws)
+        # save the file
 
-3) Edit ~/.p10k.zsh and update the 'typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS' section to look like this
+4) Edit ~/.p10k.zsh and update the 'typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS' section to look like this
 
           # The list of segments shown on the left. Fill it with the most important segments.
           typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(
